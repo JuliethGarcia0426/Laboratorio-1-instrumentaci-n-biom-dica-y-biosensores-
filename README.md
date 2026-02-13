@@ -124,5 +124,5 @@ Estos resultados evidencian que el algoritmo permite diferenciar entre distintos
 ## Autores
 Julieth Paola García Padilla ~ 5600769
 Yader Steeven Ortiz Mendez ~ 5600782
-Andres Felipe Torres ~ 5600825
+Andres Felipe Torres Morales ~ 5600825
 Ingeniería Biomédica
