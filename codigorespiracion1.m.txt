@@ -1,0 +1,126 @@
+clc; clear; close all;
+
+%% ===============================
+%        CONFIGURACIÓN
+% ===============================
+puerto = "COM5";   
+baudrate = 115200;
+duracion = input('Ingrese la duración de la evaluación en segundos: ');
+
+arduino = serialport(puerto, baudrate);
+flush(arduino);
+
+%% ===============================
+%        PARÁMETROS
+% ===============================
+fs = 200;                  % Frecuencia de muestreo (Hz)
+N = duracion * fs;         % Número de muestras
+
+data = zeros(1, N);
+tiempo = linspace(0, duracion, N);
+
+% Filtro pasa bajas (respiración)
+fc = 0.1;                  % Frecuencia de corte (Hz)
+[b,a] = butter(4, fc/(fs/2), 'low');
+zi = zeros(max(length(a),length(b))-1,1);
+
+offset_buffer = zeros(50,1);
+
+%% ===============================
+%        GRÁFICA EN TIEMPO REAL
+% ===============================
+figure;
+h = plot(tiempo, data);
+xlabel('Tiempo (s)');
+ylabel('Amplitud');
+title('Señal respiratoria en el tiempo');
+grid on;
+ylim([0 2]);
+xlim([0 duracion]);
+
+%% ===============================
+%        ADQUISICIÓN
+% ===============================
+tic
+i = 1;
+
+while toc < duracion && i <= N
+    
+    if arduino.NumBytesAvailable > 0
+        
+        raw = str2double(readline(arduino));
+        
+        if ~isnan(raw)
+            
+            % Eliminación de offset
+            offset_buffer = [offset_buffer(2:end); raw];
+            offset = mean(offset_buffer);
+            dato = raw - offset;
+            
+            % Rectificación
+            dato = abs(dato);
+            
+            % Ganancia
+            dato = dato / 250;
+            
+            % Filtrado
+            [dato_filtrado, zi] = filter(b,a,dato,zi);
+            
+            data(i) = dato_filtrado;
+            
+            set(h, 'YData', data);
+            drawnow limitrate
+            
+            i = i + 1;
+        end
+    end
+end
+
+clear arduino
+
+%   PROCESAMIENTO DE LA SEÑAL
+
+senal = data(data > 0);
+senal = senal - mean(senal);
+[picos, locs] = findpeaks(senal, fs, ...
+    'MinPeakDistance', 2, ...     % evita contar ruido
+    'MinPeakProminence', 0.02);   % picos reales
+
+num_respiraciones = length(picos);
+frecuencia_rpm = (num_respiraciones / duracion) * 60;
+
+if length(locs) > 1
+    periodo_promedio = mean(diff(locs));
+else
+    periodo_promedio = NaN;
+end
+
+fprintf('\n--- DETECCIÓN AUTOMÁTICA ---\n');
+fprintf('Respiraciones detectadas: %d\n', num_respiraciones);
+fprintf('Frecuencia respiratoria: %.2f rpm\n', frecuencia_rpm);
+fprintf('Periodo respiratorio promedio: %.2f s\n', periodo_promedio);
+
+%   TRANSFORMADA DE FOURIER (FFT)
+
+L = length(senal);              
+Y = fft(senal);                 
+P2 = abs(Y/L);                  
+P1 = P2(1:floor(L/2)+1);        
+P1(2:end-1) = 2*P1(2:end-1);
+
+f = fs*(0:floor(L/2))/L;        
+
+[amp_max, idx] = max(P1);
+frecuencia_dominante = f(idx);
+fprintf('\n--- ANÁLISIS EN FRECUENCIA ---\n');
+fprintf('Frecuencia dominante: %.3f Hz\n', frecuencia_dominante);
+
+%   GRÁFICA EN FRECUENCIA
+figure;
+plot(f, P1, 'b', 'LineWidth', 1.5)
+xlabel('Frecuencia (Hz)')
+ylabel('Magnitud')
+title('Espectro en frecuencia')
+grid on
+xlim([0 2])  
+
